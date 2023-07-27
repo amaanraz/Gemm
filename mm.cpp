@@ -170,10 +170,11 @@ void gemm_tile(float C[NI*NJ], float A[NI*NK], float B[NK*NJ], float alpha, floa
 static
 void gemm_tile_simd(float C[NI*NJ], float A[NI*NK], float B[NK*NJ], float alpha, float beta)
 {
-  {
     int i, j, k, x, y, z;
     int VECTOR_SIZE = 8;
     int TILE_SIZE = 32;
+    // Broadcast alpha to SIMD vector
+    __m256 alpha_vec = _mm256_set1_ps(alpha);
 
     // Loop over tiles in i, j, and k dimensions
     // Loop over tiles in i, j, and k dimensions
@@ -191,48 +192,72 @@ void gemm_tile_simd(float C[NI*NJ], float A[NI*NK], float B[NK*NJ], float alpha,
 
                 // Perform matrix multiplication on the tiles using SIMD intrinsics
                 for (x = i; x < i + TILE_SIZE && x < NI; x++) {
-                    for (y = j; y < j + TILE_SIZE && y < NJ; y++) {
-                        __m256 sum = _mm256_setzero_ps();
-                        for (z = k; z < k + TILE_SIZE && z < NK; z += 8) {
-                            __m256 A_tile = _mm256_loadu_ps(&A[x * NK + z]);
-                            __m256 B_tile = _mm256_loadu_ps(&B[z * NJ + y]);
-                            sum = _mm256_add_ps(_mm256_mul_ps(A_tile,B_tile),sum);;
-                        }
+                    for (y = j; y < j + TILE_SIZE && y < NJ; y+=8) {
+                        __m256 c_vec = _mm256_loadu_ps(&C[x * NJ + y]);
+                        for (z = k; z < k + TILE_SIZE && z < NK; z++) {
+                            // Load A and B vectors
+                            __m256 a_vec = _mm256_set1_ps(A[x * NK + z]);
+                            __m256 b_vec = _mm256_loadu_ps(&B[z * NJ + y]);
 
-                        // Extract the sum and add to C[x * NJ + y]
-                        float tmp[8];
-                        _mm256_storeu_ps(tmp, sum);
-                        for(int a = 0; a < 8; a++){
-                          C[x * NJ + y] += alpha * tmp[a];
+                            // Multiply A, B, and alpha vectors
+                            __m256 result = _mm256_mul_ps(_mm256_mul_ps(a_vec, b_vec), alpha_vec);
+                            
+                            c_vec = _mm256_add_ps(c_vec, result);
                         }
+                        // Store the updated C vector
+                        _mm256_storeu_ps(&C[x * NJ + y], c_vec);
                     }
                 }
             }
         }
     }
   }
-}
 
 /* Main computational kernel: with tiling, simd, and parallelization optimizations. */
 static
 void gemm_tile_simd_par(float C[NI*NJ], float A[NI*NK], float B[NK*NJ], float alpha, float beta)
 {
-  int i, j, k;
+ int i, j, k, x, y, z;
+    const int VECTOR_SIZE = 8;
+    const int TILE_SIZE = 32;
+    // Broadcast alpha to SIMD vector
+    __m256 alpha_vec = _mm256_set1_ps(alpha);
 
-// => Form C := alpha*A*B + beta*C,
-//A is NIxNK
-//B is NKxNJ
-//C is NIxNJ
-  for (i = 0; i < NI; i++) {
-    for (j = 0; j < NJ; j++) {
-      C[i*NJ+j] *= beta;
+    #pragma omp parallel for
+    for (int i = 0; i < NI; i += TILE_SIZE) {
+        #pragma omp parallel for
+        for (int j = 0; j < NJ; j += TILE_SIZE) {
+            for (int k = 0; k < NK; k += TILE_SIZE) {
+                // Tile level computation
+                if (k == 0) {
+                    for (int x = i; x < i + TILE_SIZE && x < NI; x++) {
+                        for (int y = j; y < j + TILE_SIZE && y < NJ; y++) {
+                            C[x * NJ + y] *= beta; // Scale C once for each tile
+                        }
+                    }
+                }
+
+                // Perform matrix multiplication on the tiles
+                for (int x = i; x < i + TILE_SIZE && x < NI; x++) {
+                    for (int y = j; y < j + TILE_SIZE && y < NJ; y+= 8) {
+                      __m256 c_vec = _mm256_loadu_ps(&C[x * NJ + y]);
+                        for (int z = k; z < k + TILE_SIZE && z < NK; z++) {
+                          // Load A and B vectors
+                          __m256 a_vec = _mm256_set1_ps(A[x * NK + z]);
+                          __m256 b_vec = _mm256_loadu_ps(&B[z * NJ + y]);
+
+                          // Multiply A, B, and alpha vectors
+                          __m256 result = _mm256_mul_ps(_mm256_mul_ps(a_vec, b_vec), alpha_vec);
+
+                          c_vec = _mm256_add_ps(c_vec, result);
+                        }
+                        // Store the updated C vector
+                        _mm256_storeu_ps(&C[x * NJ + y], c_vec);
+                    }
+                }
+            }
+        }
     }
-    for (j = 0; j < NJ; j++) {
-      for (k = 0; k < NK; ++k) {
-	C[i*NJ+j] += alpha * A[i*NK+k] * B[k*NJ+j];
-      }
-    }
-  }
 }
 
 int main(int argc, char** argv)
