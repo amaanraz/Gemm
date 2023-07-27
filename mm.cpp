@@ -176,10 +176,11 @@ void gemm_tile_simd(float C[NI*NJ], float A[NI*NK], float B[NK*NJ], float alpha,
     int TILE_SIZE = 32;
 
     // Loop over tiles in i, j, and k dimensions
+    // Loop over tiles in i, j, and k dimensions
     for (i = 0; i < NI; i += TILE_SIZE) {
         for (j = 0; j < NJ; j += TILE_SIZE) {
             for (k = 0; k < NK; k += TILE_SIZE) {
-                // Initialize the current tile of C to zero (if k == 0)
+                // Tile level computation
                 if (k == 0) {
                     for (x = i; x < i + TILE_SIZE && x < NI; x++) {
                         for (y = j; y < j + TILE_SIZE && y < NJ; y++) {
@@ -191,25 +192,25 @@ void gemm_tile_simd(float C[NI*NJ], float A[NI*NK], float B[NK*NJ], float alpha,
                 // Perform matrix multiplication on the tiles using SIMD intrinsics
                 for (x = i; x < i + TILE_SIZE && x < NI; x++) {
                     for (y = j; y < j + TILE_SIZE && y < NJ; y++) {
-                        for (z = k; z < k + TILE_SIZE && z < NK; z++) {
-                            __m256 A_tile = _mm256_set1_ps(alpha * A[x * NK + z]);
+                        __m256 sum = _mm256_setzero_ps();
+                        for (z = k; z < k + TILE_SIZE && z < NK; z += 8) {
+                            __m256 A_tile = _mm256_loadu_ps(&A[x * NK + z]);
                             __m256 B_tile = _mm256_loadu_ps(&B[z * NJ + y]);
+                            sum = _mm256_add_ps(_mm256_mul_ps(A_tile,B_tile),sum);;
+                        }
 
-                            __m256 mul_result = _mm256_mul_ps(A_tile, B_tile);
-
-                            // Extract the individual elements from mul_result and add to C[x * NJ + y]
-                            float tmp[8];
-                            _mm256_storeu_si256((__m256*)tmp, mul_result);
-                            for (int i = 0; i < 8; i++) {
-                                C[x * NJ + y + i] += tmp[i];
-                            }
+                        // Extract the sum and add to C[x * NJ + y]
+                        float tmp[8];
+                        _mm256_storeu_ps(tmp, sum);
+                        for(int a = 0; a < 8; a++){
+                          C[x * NJ + y] += alpha * tmp[a];
                         }
                     }
                 }
             }
         }
     }
-}
+  }
 }
 
 /* Main computational kernel: with tiling, simd, and parallelization optimizations. */
