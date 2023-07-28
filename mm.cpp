@@ -46,7 +46,7 @@ void print_and_valid_array_sum(float C[NI*NJ])
 
   float sum = 0.0;
   float golden_sum = 27789682688.000000;
-  
+
   for (i = 0; i < NI; i++)
     for (j = 0; j < NJ; j++)
       sum += C[i*NJ+j];
@@ -98,18 +98,18 @@ void gemm_tile(float C[NI*NJ], float A[NI*NK], float B[NK*NJ], float alpha, floa
       for (k = 0; k < NK; k += TILE_SIZE) {
 
         // *Tiling loop start
-        for (l = i; l < i + TILE_SIZE && l < NI; l++) {         
+        for (l = i; l < i + TILE_SIZE && l < NI; l++) {
           for (m = j; m < j + TILE_SIZE && m < NJ; m++) {
             if(k == 0) {
-              C[l*NJ+m] *= beta;  
+              C[l*NJ+m] *= beta;
             }
             for (n = k; n < k + TILE_SIZE && n < NK; n++) {
-              C[l*NJ+m] +=  alpha * A[l*NK+n] * B[n*NJ+m];             
+              C[l*NJ+m] +=  alpha * A[l*NK+n] * B[n*NJ+m];
             }
           }
         }
-        // *Tiling loop end       
-      }   
+        // *Tiling loop end
+      }
     }
   }
 }
@@ -149,7 +149,7 @@ void gemm_tile_simd(float C[NI*NJ], float A[NI*NK], float B[NK*NJ], float alpha,
 
                             // Multiply A, B, and alpha vectors
                             __m256 result = _mm256_mul_ps(_mm256_mul_ps(a_vec, b_vec), alpha_vec);
-                            
+
                             c_vec = _mm256_add_ps(c_vec, result);
                         }
                         // Store the updated C vector
@@ -173,22 +173,25 @@ void gemm_tile_simd_par(float C[NI*NJ], float A[NI*NK], float B[NK*NJ], float al
     const int NUM_THREADS = 18;
     // Broadcast alpha to SIMD vector
     __m256 alpha_vec = _mm256_set1_ps(alpha);
-    
+    __m256 beta_vec = _mm256_set1_ps(beta);
+
     if (beta != 1.0f) {
         for (i = 0; i < NI; i++) {
-            for (j = 0; j < NJ; j++) {
-                C[i * NJ + j] *= beta;
+            for (j = 0; j < NJ; j+=8) {
+              __m256 c_vec = _mm256_loadu_ps(&C[i * NJ + j]);
+              c_vec = _mm256_mul_ps(c_vec,beta_vec);
+              _mm256_storeu_ps(&C[i * NJ + j],c_vec);
             }
         }
     }
 
-    // omp_set_num_threads(6);
+    omp_set_num_threads(NUM_THREADS);
      // Parallelize the outer loops using OpenMP
     #pragma omp parallel for private(i, j, k, x, y, z)
     for (i = 0; i < NI; i += TILE_SIZEI) {
        for (j = 0; j < NJ; j += TILE_SIZEJ) {
           for (k = 0; k < NK; k += TILE_SIZEK) {
-            
+
                 // Tile level computation
                 int x_end = i + TILE_SIZEI;
                 int y_end = j + TILE_SIZEJ;
@@ -258,7 +261,7 @@ int main(int argc, char** argv)
     opt = atoi(argv[1]);
   }
   //printf("option: %d\n", opt);
-  
+
   /* Initialize array(s). */
   init_array (C, A, B);
 
@@ -303,6 +306,6 @@ int main(int argc, char** argv)
   free(A);
   free(B);
   free(C);
-  
+
   return 0;
 }
