@@ -85,29 +85,31 @@ void gemm_base(float C[NI*NJ], float A[NI*NK], float B[NK*NJ], float alpha, floa
 static
 void gemm_tile(float C[NI*NJ], float A[NI*NK], float B[NK*NJ], float alpha, float beta)
 {
-  int i, j, k, ii, jj, kk;
-  int TILE_SIZE = 32; // Choose an appropriate tile size (experimentally).
+  int i, j, k;
+  int l, m, n;
+  int TILE_SIZE = 16;
 
-  for(int i = 0; i < NI; i += TILE_SIZE){
-    for(int j = 0; j < NJ; j += TILE_SIZE){
-      for(int k = 0; k < NK; k += TILE_SIZE){
-        
-        if(k == 0){
-          for(int x = i; x < i + TILE_SIZE && x < NI; x++){
-            for(int y = j; y < j + TILE_SIZE && y < NJ; y++){
-              C[x*NJ+y] *= beta;
+// => Form C := alpha*A*B + beta*C,
+//A is NIxNK
+//B is NKxNJ
+//C is NIxNJ
+  for (i = 0; i < NI; i+= TILE_SIZE) {
+    for (j = 0; j < NJ; j += TILE_SIZE) {
+      for (k = 0; k < NK; k += TILE_SIZE) {
+
+        // *Tiling loop start
+        for (l = i; l < i + TILE_SIZE && l < NI; l++) {         
+          for (m = j; m < j + TILE_SIZE && m < NJ; m++) {
+            if(k == 0) {
+              C[l*NJ+m] *= beta;  
+            }
+            for (n = k; n < k + TILE_SIZE && n < NK; n++) {
+              C[l*NJ+m] +=  alpha * A[l*NK+n] * B[n*NJ+m];             
             }
           }
         }
-
-        for(int x = i; x < i + TILE_SIZE && x < NI; x++){
-          for(int y = j; y < j + TILE_SIZE && y < NJ; y++){
-            for(int z = k; z < k + TILE_SIZE && z < NK; z++){
-              C[x*NJ+y] += alpha * A[x*NK+z] * B[z*NJ+y];
-            }
-          }
-        }
-      }
+        // *Tiling loop end       
+      }   
     }
   }
 }
