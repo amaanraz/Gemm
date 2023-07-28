@@ -167,27 +167,29 @@ void gemm_tile_simd_par(float C[NI*NJ], float A[NI*NK], float B[NK*NJ], float al
 {
  int i, j, k, x, y, z;
     const int VECTOR_SIZE = 8;
-    const int TILE_SIZEI = 32;
-    const int TILE_SIZEJ = 64;
-    const int TILE_SIZEK = 64;
+    const int TILE_SIZEI = 16;
+    const int TILE_SIZEJ = 2048;
+    const int TILE_SIZEK = 8;
     const int NUM_THREADS = 18;
+    omp_set_num_threads(NUM_THREADS);
     // Broadcast alpha to SIMD vector
     __m256 alpha_vec = _mm256_set1_ps(alpha);
     __m256 beta_vec = _mm256_set1_ps(beta);
 
-    if (beta != 1.0f) {
-        for (i = 0; i < NI; i++) {
-            for (j = 0; j < NJ; j+=8) {
-              __m256 c_vec = _mm256_loadu_ps(&C[i * NJ + j]);
-              c_vec = _mm256_mul_ps(c_vec,beta_vec);
-              _mm256_storeu_ps(&C[i * NJ + j],c_vec);
-            }
+    
+    #pragma omp parallel for private(i,j)
+    for (i = 0; i < NI; i++) {
+        for (j = 0; j < NJ; j+=8) {
+          __m256 c_vec = _mm256_loadu_ps(&C[i * NJ + j]);
+          c_vec = _mm256_mul_ps(c_vec,beta_vec);
+          _mm256_storeu_ps(&C[i * NJ + j],c_vec);
         }
     }
+    
 
-    omp_set_num_threads(NUM_THREADS);
+    
      // Parallelize the outer loops using OpenMP
-    #pragma omp parallel for private(i, j, k, x, y, z)
+    #pragma omp parallel for private(i, j, k, x, y, z) schedule(static)
     for (i = 0; i < NI; i += TILE_SIZEI) {
        for (j = 0; j < NJ; j += TILE_SIZEJ) {
           for (k = 0; k < NK; k += TILE_SIZEK) {
